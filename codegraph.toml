@@ -1,0 +1,23 @@
+# Per-repository configuration for codegraph (dev-agent-kit). Owned by this repository.
+# Reference: ../dev-agent-kit/codegraph/codegraph.example.toml
+
+language = "java"
+
+# Ordered module rules: first match wins; the `*` segment names the module.
+# Units a reviewer recognises: the two Java packages and the test tree.
+modules = [
+  { pattern = "src/main/java/*", kind = "package" },   # Main, TodoList
+  { pattern = "src/test/java",   kind = "test" },
+]
+
+# Dropped by the mapper on top of the defaults (**/build/**, **/target/**, **/.git/** ...).
+# .gradle/, .idea/ and build/ are committed in this repository; none of it is source.
+exclude = [".gradle/**", ".idea/**", "gradle/**", ".claude/**", "docs/**"]
+
+# scip-java sees both build.gradle and scip-java.json here and must be told which to use.
+# "scip" = the manual config in scip-java.json (javac from JAVA_HOME; JDK 17+).
+# The Gradle route is not usable: the wrapper pins Gradle 6.7, which only runs on JDK 15 or
+# older. If the wrapper is ever upgraded, switch to build_tool = "gradle" and delete
+# scip-java.json. Test sources compile with JUnit unresolved (no classpath), so calls into
+# org.junit.* are classified unresolved; the index still covers every test method.
+java = { build_tool = "scip" }
