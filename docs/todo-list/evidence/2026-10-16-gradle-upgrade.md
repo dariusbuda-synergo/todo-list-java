@@ -1,0 +1,918 @@
+# 2026-10-16 — gradle-upgrade, observed build outputs
+
+Observed outputs of named commands, run from the worktree `.claude/worktrees/gradle-upgrade`
+on branch `feature/gradle-upgrade`, base `main` @ 46cd985. JAVA_HOME = $J21 =
+`/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home` (`openjdk version "21.0.12.1" 2026-08-18`)
+unless a command says otherwise. `BASE=46cd9856e9d589a2ce56ad2006bb20b7599372da`.
+
+## Slice 1 — untrack build state and fix `.gitignore`
+
+Changes made: `git rm -r --cached --quiet build .gradle` (index only), `.gitignore` rewritten to the
+five lines of the design, this file created and listed in `docs/todo-list/README.md`.
+
+The design's `HEAD~1 HEAD` checks were run before the commit, on the staged change, as
+`git diff --cached --name-status HEAD` (index against the parent commit `d892696`); the verifier
+re-runs them as `HEAD~1 HEAD` on the commit. `$BASE..HEAD` was run as `git diff --cached $BASE`
+for the same reason.
+
+### `$J21/bin/java -version 2>&1 | head -1`
+
+```
+openjdk version "21.0.12.1" 2026-08-18
+```
+
+The JDK used for every command below that runs Java.
+
+### `JAVA_HOME=$J21 ./gradlew test; echo "exit=$?"`
+
+```
+Starting a Gradle Daemon, 3 incompatible Daemons could not be reused, use --status for details
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Settings file '/Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/settings.gradle'
+
+* What went wrong:
+Could not compile settings file '/Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/settings.gradle'.
+> startup failed:
+  General error during semantic analysis: Unsupported class file major version 65
+  
+  java.lang.IllegalArgumentException: Unsupported class file major version 65
+[… 211 lines elided …]
+  
+  1 error
+
+* Try:
+Run with --stacktrace option to get the stack trace. Run with --info or --debug option to get more log output. Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1s
+exit=1
+```
+
+Baseline, recorded not fixed: the Gradle 6.7 wrapper fails at startup on JDK 21 with `Unsupported class file major version 65` while compiling `settings.gradle`, as on the base. Slice 1 does not touch the build; the gate is red as the design expects for this slice.
+
+### `git ls-files build .gradle | wc -l`
+
+```
+       0
+```
+
+Nothing under `build/` or `.gradle/` is tracked any more.
+
+### `git diff --cached --name-status HEAD | grep -vE '^D\s+(build|\.gradle)/'`
+
+```
+M	.gitignore
+M	docs/todo-list/README.md
+A	docs/todo-list/evidence/2026-10-16-gradle-upgrade.md
+```
+
+Apart from the index removals, the change touches exactly `.gitignore`, the README and this file.
+
+### `git diff --cached --name-status HEAD | grep -cE '^D\s+(build|\.gradle)/'`
+
+```
+55
+```
+
+### `git diff --cached --name-status HEAD | grep -E '^D\s+build/' | wc -l`
+
+```
+      25
+```
+
+### `git diff --cached --name-status HEAD | grep -E '^D\s+\.gradle/' | wc -l`
+
+```
+      30
+```
+
+The removals split into the two directories as the contract counted them.
+
+### `git check-ignore -v build/x .gradle/x bin/x out/x .DS_Store src/main/.DS_Store`
+
+```
+.gitignore:1:build/	build/x
+.gitignore:2:.gradle/	.gradle/x
+.gitignore:4:bin/	bin/x
+.gitignore:5:out/	out/x
+.gitignore:3:.DS_Store	.DS_Store
+.gitignore:3:.DS_Store	src/main/.DS_Store
+```
+
+Each probe path is ignored by its own line of `.gitignore`, including a nested `.DS_Store`.
+
+### `git check-ignore gradle/wrapper/gradle-wrapper.jar gradlew gradlew.bat gradle.properties .idea/misc.xml src/main/java/Main/Main.java objectFile.txt dataFile.txt; echo $?`
+
+```
+1
+```
+
+No path printed: the wrapper, `gradle.properties`, `.idea/`, sources and the data files are not ignored.
+
+### `git ls-files -ci --exclude-standard`
+
+```
+
+```
+
+Empty: no tracked file is matched by an ignore rule.
+
+### `cat -vet .gitignore`
+
+```
+build/$
+.gradle/$
+.DS_Store$
+bin/$
+out/$
+```
+
+Five lines, LF endings, no leading `/`, no stray text.
+
+### `test -d build && test -d .gradle && echo present`
+
+```
+present
+```
+
+Only the index changed; the directories stay on disk.
+
+### `git diff --cached $BASE -- src/ objectFile.txt dataFile.txt settings.gradle build.gradle gradle/ gradlew gradlew.bat codegraph.toml scip-java.json .idea/`
+
+```
+
+```
+
+Empty: none of the frozen or slice-2 files changed.
+
+### `git ls-files -s gradlew`
+
+```
+100755 4f906e0c811fc9e230eb44819f509cd0627f2600 0	gradlew
+```
+
+### `git status --porcelain | grep -vE '^D  (build|\.gradle)/'`
+
+```
+M  .gitignore
+M  docs/todo-list/README.md
+A  docs/todo-list/evidence/2026-10-16-gradle-upgrade.md
+```
+
+Run after the gate, before the commit: only the staged slice-1 changes; the gate run left no untracked or modified file (its output lands in ignored directories).
+
+## Slice 2 — Gradle 9.7.1 wrapper, build script fixes, gate green on JDK 21
+
+Changes made: `gradle-wrapper.properties:3` hand-edited to the 9.7.1 `distributionUrl` (the only hand
+edit to a wrapper file), then the four wrapper files regenerated by the 9.7.1 `wrapper` task;
+`build.gradle` written to the design's 32-line content; `gradle.properties` added with the design's
+two lines. `J27=/opt/homebrew/opt/openjdk@27/libexec/openjdk.jdk/Contents/Home`. As in slice 1, the
+`HEAD~1 HEAD` and `$BASE..HEAD` checks were run before the commit on the staged change
+(`git diff --cached … HEAD` / `git diff --cached $BASE …`).
+
+### `ls ~/.gradle/wrapper/dists/gradle-9.7.1-bin/*/`
+
+```
+gradle-9.7.1
+gradle-9.7.1-bin.zip.lck
+gradle-9.7.1-bin.zip.ok
+```
+
+### `ls ~/.gradle/caches/modules-2/files-2.1/org.junit.platform/`
+
+```
+junit-platform-commons
+junit-platform-engine
+```
+
+Pre-state: the 9.7.1 distribution is cached and unpacked; `junit-platform-launcher` is not in the cache.
+
+### `ls ~/.gradle/jdks; ls ~/.gradle/gradle.properties`
+
+```
+ls: /Users/ituser/.gradle/jdks: No such file or directory
+ls: /Users/ituser/.gradle/gradle.properties: No such file or directory
+```
+
+No provisioned JDKs and no user-level `gradle.properties` before the slice.
+
+### `sed -i '' '3s#.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip#' gradle/wrapper/gradle-wrapper.properties; git diff gradle/wrapper/gradle-wrapper.properties`
+
+```
+diff --git a/gradle/wrapper/gradle-wrapper.properties b/gradle/wrapper/gradle-wrapper.properties
+index be52383..c56b367 100644
+--- a/gradle/wrapper/gradle-wrapper.properties
++++ b/gradle/wrapper/gradle-wrapper.properties
+@@ -1,5 +1,5 @@
+ distributionBase=GRADLE_USER_HOME
+ distributionPath=wrapper/dists
+-distributionUrl=https\://services.gradle.org/distributions/gradle-6.7-bin.zip
++distributionUrl=https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip
+ zipStoreBase=GRADLE_USER_HOME
+ zipStorePath=wrapper/dists
+```
+
+Bootstrap edit: line 3 only.
+
+### `JAVA_HOME=$J21 ./gradlew wrapper --gradle-version 9.7.1 --distribution-type bin; echo "exit=$?"`
+
+```
+Welcome to Gradle 9.7.1!
+
+Here are the highlights of this release:
+ - Isolated Projects graduates to incubating
+ - Broader Configuration Cache compatibility
+ - Resilient Sync helps you fix broken builds
+ - More source locations in problem reports
+
+For more details see https://docs.gradle.org/9.7.1/release-notes.html
+
+Starting a Gradle Daemon, 1 incompatible Daemon could not be reused, use --status for details
+> Task :wrapper
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.7.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 2s
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+The 6.7 launcher jar started the cached 9.7.1 distribution (R1 did not occur) and the `wrapper` task
+ran. The old `build.gradle` was still in place for this run; it was not run with `--warning-mode all`,
+so the individual deprecations behind the summary line are not listed here.
+
+### `git status --porcelain; shasum gradlew gradlew.bat gradle/wrapper/*` (after the first `wrapper` run)
+
+```
+ M gradle/wrapper/gradle-wrapper.jar
+ M gradle/wrapper/gradle-wrapper.properties
+ M gradlew
+ M gradlew.bat
+d736ad5dfd6ed6956523b8462c714ab8674b19e8  gradlew
+1d54ad9d8c57ac92b09870e9e80010f51369ee02  gradlew.bat
+492e069f1bee706be2822dacec756e53ea5f9587  gradle/wrapper/gradle-wrapper.jar
+dce1e3198bd9c48213fcd38a4ce9cf6c5454ddbe  gradle/wrapper/gradle-wrapper.properties
+```
+
+### `JAVA_HOME=$J21 ./gradlew wrapper --gradle-version 9.7.1 --distribution-type bin; echo "exit=$?"` (second run, new wrapper)
+
+```
+> Task :wrapper UP-TO-DATE
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.7.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 238ms
+1 actionable task: 1 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+### `shasum gradlew gradlew.bat gradle/wrapper/* > sha2.txt; diff sha1.txt sha2.txt && echo SHA-IDENTICAL`
+
+```
+SHA-IDENTICAL
+```
+
+The second run reported the task `UP-TO-DATE`, so it did not rewrite the files. To show the output is
+the task's own and stable, the task was forced once more:
+
+### `JAVA_HOME=$J21 ./gradlew wrapper --gradle-version 9.7.1 --distribution-type bin --rerun-tasks; echo "exit=$?"` then `diff sha1.txt sha3.txt && echo SHA-IDENTICAL`
+
+```
+> Task :wrapper
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.7.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 683ms
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+```
+SHA-IDENTICAL
+```
+
+The forced re-execution wrote byte-identical files.
+
+### `cat -n gradle/wrapper/gradle-wrapper.properties; ls -l gradle/wrapper/gradle-wrapper.jar`
+
+```
+     1	distributionBase=GRADLE_USER_HOME
+     2	distributionPath=wrapper/dists
+     3	distributionUrl=https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip
+     4	networkTimeout=10000
+     5	retries=0
+     6	retryBackOffMs=500
+     7	validateDistributionUrl=true
+     8	zipStoreBase=GRADLE_USER_HOME
+     9	zipStorePath=wrapper/dists
+-rw-r--r--@ 1 ituser  staff  47505 Oct 16 17:02 gradle/wrapper/gradle-wrapper.jar
+```
+
+The generated properties are the five original keys plus the four the design expected; no
+`distributionSha256Sum`.
+
+### `` wc -l build.gradle gradle.properties; D=docs/todo-list/design/2026-10-16-gradle-upgrade-design.md; sed -n '/^```groovy$/,/^```$/p' $D | sed '1d;$d' | diff - build.gradle && echo BUILD-IDENTICAL; sed -n '/^```properties$/,/^```$/p' $D | sed '1d;$d' | diff - gradle.properties && echo PROPS-IDENTICAL ``
+
+```
+      32 build.gradle
+       2 gradle.properties
+      34 total
+BUILD-IDENTICAL
+PROPS-IDENTICAL
+```
+
+`build.gradle` and `gradle.properties` are identical to the fenced `groovy` and `properties` blocks of
+design § Interfaces; `build.gradle` ends with one newline (`tail -c1 build.gradle | xxd` → `0a`).
+
+### `JAVA_HOME=$J21 ./gradlew --offline dependencies --configuration testRuntimeClasspath; echo "exit=$?"`
+
+```
+> Task :dependencies
+
+------------------------------------------------------------
+Root project 'todolist'
+------------------------------------------------------------
+
+testRuntimeClasspath - Runtime classpath of source set 'test'.
++--- org.junit.jupiter:junit-jupiter-api:5.6.0
+|    +--- org.junit:junit-bom:5.6.0
+|    |    +--- org.junit.jupiter:junit-jupiter-api:5.6.0 (c)
+|    |    +--- org.junit.jupiter:junit-jupiter-engine:5.6.0 (c)
+|    |    +--- org.junit.platform:junit-platform-commons:1.6.0 (c)
+|    |    +--- org.junit.platform:junit-platform-launcher:1.6.0 FAILED
+|    |    \--- org.junit.platform:junit-platform-engine:1.6.0 (c)
+|    +--- org.apiguardian:apiguardian-api:1.1.0
+|    +--- org.opentest4j:opentest4j:1.2.0
+|    \--- org.junit.platform:junit-platform-commons:1.6.0
+|         +--- org.junit:junit-bom:5.6.0 (*)
+|         \--- org.apiguardian:apiguardian-api:1.1.0
++--- org.junit.jupiter:junit-jupiter-engine -> 5.6.0
+|    +--- org.junit:junit-bom:5.6.0 (*)
+|    +--- org.apiguardian:apiguardian-api:1.1.0
+|    +--- org.junit.platform:junit-platform-engine:1.6.0
+|    |    +--- org.junit:junit-bom:5.6.0 (*)
+|    |    +--- org.apiguardian:apiguardian-api:1.1.0
+|    |    +--- org.opentest4j:opentest4j:1.2.0
+|    |    \--- org.junit.platform:junit-platform-commons:1.6.0 (*)
+|    \--- org.junit.jupiter:junit-jupiter-api:5.6.0 (*)
+\--- org.junit.platform:junit-platform-launcher -> 1.6.0 FAILED
+
+(c) - A dependency constraint, not a dependency. The dependency affected by the constraint occurs elsewhere in the tree.
+(*) - Indicates repeated occurrences of a transitive dependency subtree. Gradle expands transitive dependency subtrees only once per project; repeat occurrences only display the root of the subtree, followed by this annotation.
+
+A web-based, searchable dependency report is available by adding the --scan option.
+
+BUILD SUCCESSFUL in 496ms
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+Offline, the only failure is `junit-platform-launcher` (not cached); the BOM already aligns it to `1.6.0`.
+
+### `JAVA_HOME=$J21 ./gradlew dependencies --configuration testRuntimeClasspath; echo "exit=$?"`
+
+```
+> Task :dependencies
+
+------------------------------------------------------------
+Root project 'todolist'
+------------------------------------------------------------
+
+testRuntimeClasspath - Runtime classpath of source set 'test'.
++--- org.junit.jupiter:junit-jupiter-api:5.6.0
+|    +--- org.junit:junit-bom:5.6.0
+|    |    +--- org.junit.jupiter:junit-jupiter-api:5.6.0 (c)
+|    |    +--- org.junit.jupiter:junit-jupiter-engine:5.6.0 (c)
+|    |    +--- org.junit.platform:junit-platform-commons:1.6.0 (c)
+|    |    +--- org.junit.platform:junit-platform-launcher:1.6.0 (c)
+|    |    \--- org.junit.platform:junit-platform-engine:1.6.0 (c)
+|    +--- org.apiguardian:apiguardian-api:1.1.0
+|    +--- org.opentest4j:opentest4j:1.2.0
+|    \--- org.junit.platform:junit-platform-commons:1.6.0
+|         +--- org.junit:junit-bom:5.6.0 (*)
+|         \--- org.apiguardian:apiguardian-api:1.1.0
++--- org.junit.jupiter:junit-jupiter-engine -> 5.6.0
+|    +--- org.junit:junit-bom:5.6.0 (*)
+|    +--- org.apiguardian:apiguardian-api:1.1.0
+|    +--- org.junit.platform:junit-platform-engine:1.6.0
+|    |    +--- org.junit:junit-bom:5.6.0 (*)
+|    |    +--- org.apiguardian:apiguardian-api:1.1.0
+|    |    +--- org.opentest4j:opentest4j:1.2.0
+|    |    \--- org.junit.platform:junit-platform-commons:1.6.0 (*)
+|    \--- org.junit.jupiter:junit-jupiter-api:5.6.0 (*)
+\--- org.junit.platform:junit-platform-launcher -> 1.6.0
+     +--- org.junit:junit-bom:5.6.0 (*)
+     +--- org.apiguardian:apiguardian-api:1.1.0
+     \--- org.junit.platform:junit-platform-engine:1.6.0 (*)
+
+(c) - A dependency constraint, not a dependency. The dependency affected by the constraint occurs elsewhere in the tree.
+(*) - Indicates repeated occurrences of a transitive dependency subtree. Gradle expands transitive dependency subtrees only once per project; repeat occurrences only display the root of the subtree, followed by this annotation.
+
+A web-based, searchable dependency report is available by adding the --scan option.
+
+BUILD SUCCESSFUL in 452ms
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+Online: no `FAILED` entry; engine `5.6.0`, launcher `1.6.0`, platform engine and commons `1.6.0`,
+all through `org.junit:junit-bom:5.6.0`.
+
+### `ls ~/.gradle/caches/modules-2/files-2.1/org.junit.platform/; find ~/.gradle/caches/modules-2/files-2.1/org.junit.platform/junit-platform-launcher -type f` (after the gate)
+
+```
+junit-platform-commons
+junit-platform-engine
+junit-platform-launcher
+~/.gradle/caches/modules-2/files-2.1/org.junit.platform/junit-platform-launcher/1.6.0/6df0a7d4c24d6beee3b5aba3747bfba5699aa576/junit-platform-launcher-1.6.0.module
+~/.gradle/caches/modules-2/files-2.1/org.junit.platform/junit-platform-launcher/1.6.0/44b6ae1e00f692907a92fa8b31e1e8023da4f057/junit-platform-launcher-1.6.0.jar
+~/.gradle/caches/modules-2/files-2.1/org.junit.platform/junit-platform-launcher/1.6.0/9230200a4edbeffa7fea4e01a878a083fbf16ff0/junit-platform-launcher-1.6.0.pom
+```
+
+Maven Central download: yes, artifacts: `org.junit.platform:junit-platform-launcher:1.6.0` (`.pom` and
+`.module` during the online `dependencies` run, `.jar` by the test run). No other artifact directory
+appeared under `org.junit.platform/`, and no JDK was downloaded (below).
+
+### `JAVA_HOME=$J21 ./gradlew --version; echo "exit=$?"`
+
+```
+------------------------------------------------------------
+Gradle 9.7.1
+------------------------------------------------------------
+
+Build time:    2026-08-19 14:16:09 UTC
+Revision:      92f0512e7f06d84621afba191f75e265363890cf
+
+Kotlin:        2.4.0
+Groovy:        4.0.32
+Ant:           Apache Ant(TM) version 1.10.17 compiled on April 6 2026
+Launcher JVM:  21.0.12.1 (Homebrew 21.0.12.1)
+Daemon JVM:    /opt/homebrew/Cellar/openjdk@21/21.0.12.1/libexec/openjdk.jdk/Contents/Home (no Daemon JVM specified, using current Java home)
+OS:            Mac OS X 27.0.1 aarch64
+
+exit=0
+```
+
+### `grep -n distributionUrl gradle/wrapper/gradle-wrapper.properties; ls ~/.gradle/wrapper/dists/gradle-9.7.1-bin/`
+
+```
+3:distributionUrl=https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip
+1w1c7tv4s851m17nbqdsro2tv
+```
+
+The cached distribution was used; no second download directory.
+
+### `JAVA_HOME=$J21 ./gradlew -q javaToolchains; echo "exit=$?"`
+
+```
+ + Options
+     | Auto-detection:     Enabled
+     | Auto-download:      Disabled
+
+ + Homebrew JDK 21 (21.0.12.1)
+     | Location:           /opt/homebrew/Cellar/openjdk@21/21.0.12.1/libexec/openjdk.jdk/Contents/Home
+     | Language Version:   21
+     | Vendor:             Homebrew
+     | Architecture:       aarch64
+     | Is JDK:             true
+     | Detected by:        Current JVM
+
+exit=0
+```
+
+`gradle.properties` takes effect: `Auto-download: Disabled`; the JDK 21 toolchain is the current JVM.
+
+### `JAVA_HOME=$J21 ./gradlew clean; echo "exit=$?"`
+
+```
+> Task :clean
+
+BUILD SUCCESSFUL in 220ms
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+### `JAVA_HOME=$J21 ./gradlew test --warning-mode all; echo "exit=$?"` (mechanical gate)
+
+```
+> Task :compileJava
+Note: /Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/src/main/java/TodoList/FileReader.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+> Task :test
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 1s
+3 actionable tasks: 3 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+### `grep -ci deprecat test.log; grep -c build.gradle test.log` (the output above saved as `test.log`)
+
+```
+0
+0
+```
+
+No deprecation line and no line naming `build.gradle`. The problems report the run points at holds two
+entries (`"totalProblemCount":2`), both the javac `compiler.note.unchecked` notes for
+`src/main/java/TodoList/FileReader.java` printed above, severity `WARNING`; none is a deprecation.
+`src/` is frozen and was not changed to silence them.
+
+### `grep -h '<testsuite' build/test-results/test/TEST-*.xml`
+
+```
+<testsuite name="TodoList.TaskTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.975Z" hostname="sgmac031.local" time="0.005">
+<testsuite name="TodoList.TodoListTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.981Z" hostname="sgmac031.local" time="0.006">
+<testsuite name="TodoList.CompareTasksTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.965Z" hostname="sgmac031.local" time="0.009">
+```
+
+Fresh XML from this run (the `clean` above removed `build/`): 7 + 1 + 6 tests, each suite
+`failures="0" errors="0" skipped="0"`, timestamps `2026-10-16`.
+
+### `$J21/bin/javap -v -cp build/classes/java/main Main.Main | grep 'major version'; $J21/bin/javap -v -cp build/classes/java/test TodoList.TaskTest | grep 'major version'`
+
+```
+  major version: 65
+  major version: 65
+```
+
+Main and test classes are compiled for Java 21.
+
+### `JAVA_HOME=$J21 ./gradlew build --warning-mode all; echo "exit=$?"`
+
+```
+> Task :compileJava UP-TO-DATE
+> Task :processResources NO-SOURCE
+> Task :classes UP-TO-DATE
+> Task :jar
+> Task :assemble
+> Task :compileTestJava UP-TO-DATE
+> Task :processTestResources NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test UP-TO-DATE
+> Task :check UP-TO-DATE
+> Task :build
+
+BUILD SUCCESSFUL in 262ms
+4 actionable tasks: 1 executed, 3 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+`build` succeeds: the removed `configurations.compile` block no longer breaks it. No deprecation line
+(`grep -ci deprecat` on this output → `0`).
+
+### `unzip -p build/libs/todolist-1.0-SNAPSHOT.jar META-INF/MANIFEST.MF`
+
+```
+Manifest-Version: 1.0
+Main-Class: Main.Main
+```
+
+### `unzip -l build/libs/todolist-1.0-SNAPSHOT.jar | grep -c '\.class$'; unzip -l build/libs/todolist-1.0-SNAPSHOT.jar | grep '\.class$'`
+
+```
+6
+      468  02-01-1980 00:00   Main/Main.class
+     3779  02-01-1980 00:00   Main/UserInterface.class
+      865  02-01-1980 00:00   TodoList/CompareTasks.class
+     2365  02-01-1980 00:00   TodoList/FileReader.class
+     2573  02-01-1980 00:00   TodoList/Task.class
+     8553  02-01-1980 00:00   TodoList/TodoList.class
+```
+
+Only the six main classes; nothing unpacked from a dependency.
+
+### `$J27/bin/java -version 2>&1 | head -1`
+
+```
+openjdk version "27" 2026-09-15
+```
+
+### `JAVA_HOME=$J27 ./gradlew test --warning-mode all -Porg.gradle.java.installations.paths=$J21; echo "exit=$?"` (JDK 27 attempt, once)
+
+```
+Starting a Gradle Daemon, 2 incompatible Daemons could not be reused, use --status for details
+Specifying 'org.gradle.java.installations.paths' as a project property on the command line has been deprecated. This is scheduled to be removed in Gradle 10. Instead, specify it as a Gradle property: '-Dorg.gradle.java.installations.paths=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home'. Consult the upgrading guide for further information: https://docs.gradle.org/9.7.1/userguide/upgrading_version_9.html#toolchain-project-properties
+> Task :compileJava UP-TO-DATE
+> Task :processResources NO-SOURCE
+> Task :classes UP-TO-DATE
+> Task :compileTestJava UP-TO-DATE
+> Task :processTestResources NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test UP-TO-DATE
+
+BUILD SUCCESSFUL in 1s
+3 actionable tasks: 3 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+exit=0
+```
+
+Observed result of the single attempt: Gradle 9.7.1 started a daemon on JDK 27 and the build exited 0,
+but every task was `UP-TO-DATE` (it ran after the JDK 21 gate and `build`, with no `clean`), so the
+tests were **not re-executed** on this run: the test XML timestamps are still those of the JDK 21 gate
+(next block). Gradle also reported the `-P` form of `org.gradle.java.installations.paths` as
+deprecated (scheduled for removal in Gradle 10, suggests `-D…`); that line comes from the command
+line, not from `build.gradle`. The attempt was not repeated.
+
+### `grep -h '<testsuite' build/test-results/test/TEST-*.xml | grep -o 'name="[^"]*".*timestamp="[^"]*"'` (after the JDK 27 attempt)
+
+```
+name="TodoList.CompareTasksTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.965Z"
+name="TodoList.TodoListTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.981Z"
+name="TodoList.TaskTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:03:28.975Z"
+```
+
+Unchanged timestamps: the JDK 27 run executed no test.
+
+### `ls ~/.gradle/jdks` (after all runs)
+
+```
+ls: /Users/ituser/.gradle/jdks: No such file or directory
+```
+
+No JDK was provisioned.
+
+### `git status --porcelain` (after all runs, before staging)
+
+```
+ M build.gradle
+ M gradle/wrapper/gradle-wrapper.jar
+ M gradle/wrapper/gradle-wrapper.properties
+ M gradlew
+ M gradlew.bat
+?? gradle.properties
+```
+
+Only the slice's own files; the runs left no other untracked or modified file (`objectFile.txt`
+untouched, IO-1). The evidence file is added after this point.
+
+### `grep -nE 'compile|enable-preview|FizzBuzz|useJUnitPlatform' build.gradle`
+
+```
+25:    useJUnitPlatform()
+```
+
+### `git diff --cached --name-only HEAD` (staged, before adding this file)
+
+```
+build.gradle
+gradle.properties
+gradle/wrapper/gradle-wrapper.jar
+gradle/wrapper/gradle-wrapper.properties
+gradlew
+gradlew.bat
+```
+
+Plus this evidence file in the commit.
+
+### `git ls-files -s gradlew`
+
+```
+100755 249efbb032ce46a80c687c0723eb172e85f6a136 0	gradlew
+```
+
+### `git diff --cached $BASE -- src/ objectFile.txt dataFile.txt settings.gradle codegraph.toml scip-java.json .idea/ | wc -l; git diff --cached 6c22c77 -- .gitignore | wc -l`
+
+```
+       0
+       0
+```
+
+No frozen file changed; `.gitignore` is unchanged since slice 1.
+
+## Slice 3 — docs state what was observed
+
+Changes made: `AGENTS.md` (intro, Subsystems build row, `BUILD-1`, Mechanical gate comment and the
+line below it, Branching frozen list gains `gradle.properties`, Build/run/test block and the
+paragraph after it), `readme.md` ("Build with" list, "Run with Gradle" replaced by "Build and run"),
+this section, and the evidence line in `docs/todo-list/README.md`. No build file, wrapper file,
+frozen file or source changed. The `HEAD~1 HEAD` checks were run before the commit against `HEAD`
+(`8e2b0d1`), as in slices 1 and 2.
+
+### `JAVA_HOME=$J21 ./gradlew clean test --warning-mode all > gate3.log 2>&1; echo "exit=$?"; cat gate3.log` (mechanical gate, after the docs edits)
+
+```
+exit=0
+> Task :clean
+
+> Task :compileJava
+Note: /Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/src/main/java/TodoList/FileReader.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+> Task :test
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 740ms
+4 actionable tasks: 4 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+```
+
+### `grep -inE 'deprecat|warning' gate3.log; echo "(grep exit=$?)"`
+
+```
+(grep exit=1)
+```
+
+### `grep -h '<testsuite' build/test-results/test/TEST-*.xml | grep -o 'name="[^"]*".*timestamp="[^"]*"'`, then each of `tests failures errors skipped` summed over the three files
+
+```
+name="TodoList.TaskTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.571Z"
+name="TodoList.TodoListTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.576Z"
+name="TodoList.CompareTasksTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.561Z"
+tests=14
+failures=0
+errors=0
+skipped=0
+```
+
+The docs-only slice leaves the gate green on JDK 21: fresh XML (after `clean`), 14 tests, 0 failures,
+0 errors, 0 skipped, no deprecation or warning line.
+
+### `git status --porcelain` (after the gate, before staging)
+
+```
+ M AGENTS.md
+ M readme.md
+```
+
+Only this slice's edits (the README and this file were edited after this point); the gate left no
+other modified or untracked file (`objectFile.txt` untouched, IO-1).
+
+### `grep -nE 'Gradle 6|6\.7|JDK 15|≤ 15|15 or older|FizzBuzz|gradle run|gradle test|committed, see' AGENTS.md readme.md; echo "(grep exit=$?)"`
+
+```
+(grep exit=1)
+```
+
+### `grep -rnE '6\.7|JDK 15|JDK ≤ 15|FizzBuzz|gradle run|committed' AGENTS.md readme.md docs/` minus the contract, the design, this file and the two verify reports
+
+```
+AGENTS.md:27:| `objectFile.txt` | the serialized task store the app writes at runtime (committed) |
+docs/todo-list/README.md:8:- `design/2026-10-16-gradle-upgrade-contract.md` — change contract for feature `gradle-upgrade`: upgrade the Gradle 6.7 build so `./gradlew test` runs on JDK 21.
+docs/todo-list/evidence/2026-10-16-codegraph-onboarding.md:70:`./gradlew test` (the mechanical gate) could not be run on this machine: the wrapper's Gradle 6.7
+docs/todo-list/evidence/2026-10-16-codegraph-onboarding.md:72:repository). It needs a JDK 15 or older. The main sources compile with javac 21 and the app
+```
+
+None is a current claim about the build: `AGENTS.md:27` is about `objectFile.txt`, which is tracked
+(`git ls-files objectFile.txt` → `objectFile.txt`), not build output; `README.md:8` describes what
+the contract set out to change (the base state); the codegraph-onboarding evidence is a dated record
+of the base. Inside the contract, design, this file and the verify reports, the remaining mentions
+describe the base state or the slice-1 baseline.
+
+### `grep -n '9.7.1\|JDK 21\|Main.Main\|JDK 27\|auto-download\|installations' AGENTS.md readme.md`
+
+```
+AGENTS.md:13:are persisted by Java serialization to `objectFile.txt` in the working directory. Gradle 9.7.1
+AGENTS.md:26:| `build.gradle`, `settings.gradle`, `gradle.properties`, `gradle/wrapper/` | Gradle 9.7.1 build of root project `todolist`, Java 21 toolchain, no JDK auto-download |
+AGENTS.md:38:- `BUILD-1` The wrapper pins Gradle 9.7.1 (`gradle/wrapper/gradle-wrapper.properties:3`), `build.gradle:8-12` pins a Java 21 toolchain and `gradle.properties` disables JDK auto-download, so Gradle must find an installed JDK 21. The gate is observed green with JAVA_HOME = JDK 21; with JAVA_HOME = JDK 27 it is green only with `-Dorg.gradle.java.installations.paths=<JDK 21>`, otherwise it fails with "Cannot find a Java installation … matching: {languageVersion=21 …}".
+AGENTS.md:43:./gradlew test        # JUnit 5 via the wrapper (build.gradle:18-26). Needs JAVA_HOME = a JDK 21 (BUILD-1).
+AGENTS.md:59:export JAVA_HOME=<a JDK 21>             # e.g. /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home (BUILD-1)
+AGENTS.md:62:java -cp build/classes/java/main Main.Main   # run from the repository root (IO-1)
+AGENTS.md:66:the app with the `java -cp` line above. The jar manifest names `Main.Main` as `Main-Class`
+readme.md:8:- Gradle 9.7.1 (wrapper, `./gradlew`)
+readme.md:9:- JDK 21
+readme.md:23:2. Point `JAVA_HOME` at a JDK 21 (the build compiles for Java 21 and never downloads a JDK)
+readme.md:26:export JAVA_HOME=<a JDK 21>   # e.g. /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+readme.md:41:java -cp build/classes/java/main Main.Main
+```
+
+Each new claim and the observed line behind it ("evidence" = this file, "verify-2" =
+`gradle-upgrade-2.verify.md`):
+
+| Claim (file:line) | Backed by |
+|---|---|
+| Gradle 9.7.1 wrapper, `gradle-wrapper.properties:3` (`AGENTS.md:13`, `:26`, `:38`; `readme.md:8`) | evidence:466 `Gradle 9.7.1`; evidence:485 `3:distributionUrl=…gradle-9.7.1-bin.zip`; verify-2:67 |
+| Java 21 toolchain at `build.gradle:8-12` (`AGENTS.md:13`, `:26`, `:38`) | verify-2:111 (`sed -n '8,12p'` is the toolchain block); `sed` below; evidence:570-571 `major version: 65` |
+| JDK auto-download disabled by `gradle.properties` (`AGENTS.md:26`, `:38`; `readme.md:23`) | evidence:496 `Auto-download: Disabled`; verify-2:69; evidence:666 and verify-2:78 no `~/.gradle/jdks` |
+| Gate green with JAVA_HOME = JDK 21 (`AGENTS.md:38`, `:43`) | evidence:538-561; verify-2:27, :31 (`tests=14 failures=0 errors=0 skipped=0`); this section's gate above |
+| JDK 27 green only with `-Dorg.gradle.java.installations.paths=<JDK 21>` (`AGENTS.md:38`) | verify-2:173-185 (run A, `exit=0`, 14/0/0/0, toolchain 21) |
+| JDK 27 without it fails "Cannot find a Java installation … {languageVersion=21 …}" (`AGENTS.md:38`) | verify-2:187-195 (run B, `exit=1`, message verbatim) |
+| Gate test config at `build.gradle:18-26` (`AGENTS.md:43`) | verify-2:112; `sed` below |
+| JDK 21 path form (`AGENTS.md:59`; `readme.md:26`) | evidence:4-5 and verify-2:11 (`J21=…`); evidence:21 `openjdk version "21.0.12.1"` |
+| `build/` ignored, `.gitignore:1` (`AGENTS.md:60`) | evidence:98 `.gitignore:1:build/	build/x`; evidence:127 |
+| No `run` task, only the `java` plugin (`AGENTS.md:65-66`; `readme.md` no longer says `gradle run`) | verify-2:86 (`grep … application\|mainClass build.gradle` → only `25:    useJUnitPlatform()`); verify-2:88 |
+| Manifest `Main-Class: Main.Main`, `build.gradle:30` (`AGENTS.md:66-67`) | evidence:604; verify-2:75, :113 |
+| JUnit 5 (`readme.md:10`) | evidence:361 `org.junit.jupiter:junit-jupiter-api:5.6.0` |
+| App reads and writes `objectFile.txt` in the current folder (`readme.md:38`) | existing invariant `IO-1` (`AGENTS.md:35`, `FileReader.java:11`, `:30`), unchanged |
+
+No JDK other than 21 and 27 is named; starting the app from the jar is stated as not verified.
+
+### `sed -n '8,12p;18,26p;30p' build.gradle`
+
+```
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+        attributes "Main-Class": "Main.Main"
+```
+
+The cited ranges hold the toolchain, the test dependencies plus the test task, and `Main-Class`.
+
+### `diff <(git show $BASE:AGENTS.md | grep -E '^(## |@)') <(grep -E '^(## |@)' AGENTS.md) && echo HEADINGS-IDENTICAL; grep -cxE '## (Subsystems|Invariants|Mechanical gate|Branching)' AGENTS.md`
+
+```
+HEADINGS-IDENTICAL
+4
+```
+
+The import line `@../dev-agent-kit/WORKSPACE.md` and every `##` heading are byte-identical to base;
+the four headings the kit reads are present. `bin/check` was not run: `../dev-agent-kit` does not
+resolve from the nested worktree (design R16); the Lead runs it on the merged commit.
+
+### `git diff --name-only HEAD` (before adding this section and the README line); `git diff $BASE -- src/ objectFile.txt dataFile.txt settings.gradle codegraph.toml scip-java.json .idea/ | wc -l`; `git diff HEAD -- build.gradle gradle.properties gradle/ gradlew gradlew.bat .gitignore | wc -l`; `ls ~/.gradle/jdks`
+
+```
+AGENTS.md
+readme.md
+       0
+       0
+ls: /Users/ituser/.gradle/jdks: No such file or directory
+```
+
+Plus this file and `docs/todo-list/README.md` in the commit. No frozen, build or source file changed;
+no JDK was provisioned.
+
+## Not verified here
+
+- **Starting the application.** Agents do not run it (design § Evidence file). Neither
+  `java -cp build/classes/java/main Main.Main` nor reading an `objectFile.txt` written by the old
+  JDK 15 build from the JDK 21 build (SER-1, design R17) was tried. `Task` is unchanged
+  (`git diff $BASE -- src/` empty in every slice).
+- **`java -jar build/libs/todolist-1.0-SNAPSHOT.jar`.** Only the manifest was checked
+  (`Main-Class: Main.Main`, evidence:604); the jar was never started.
+- **The builder's JDK 27 attempt is not a JDK 27 result.** The slice-2 run
+  (`JAVA_HOME=$J27 … -Porg.gradle.java.installations.paths=$J21`, no `clean`) had every task
+  `UP-TO-DATE` and executed no test (Slice 2 above); its `-P` form also prints a Gradle 10
+  deprecation. The JDK 27 facts in `AGENTS.md` come from the slice-2 verifier's runs with `clean`
+  (verify-2:173-215): green with `-Dorg.gradle.java.installations.paths=<JDK 21>`, red without it
+  because the Homebrew JDK 21 is not auto-detected when Gradle runs on 27.
+- **Gradle on any JDK other than 21 and 27** (for example 17) was not run; the docs name no other JDK.
+- **JDK 21 discovery on other machines.** Only this machine's Homebrew layout was observed; whether
+  another installation of JDK 21 is auto-detected when Gradle runs on a different JDK is unknown.
+- **Wrapper distribution checksum.** `distributionSha256Sum` is not pinned (design § Interfaces).
+- **`.idea/` still targets JDK 15** (`.idea/compiler.xml:4` `bytecodeTargetLevel target="15"`,
+  `.idea/misc.xml:14` `languageLevel="JDK_15"`); left alone by settled decision 4. IDE builds were
+  not tried.
+- **Contract inaccuracy.** The contract says `src/` has no arrow-`switch`; the slice-2 verifier found
+  14 `case … ->` sites (verify-2:224-229). Arrow `switch` is standard since Java 14, so removing
+  `--enable-preview` was still correct, as the green gate without it shows.
+- **Stale `codegraph.toml` comments (follow-up).** `codegraph.toml:14` says `.gradle/`, `.idea/` and
+  `build/` are committed; after slice 1 only `.idea/` is. `codegraph.toml:19-20` says the wrapper
+  pins Gradle 6.7; it now pins 9.7.1. The file is frozen by settled decision 6 and was not edited.
+- **Codegraph `build_tool` switch deferred** (settled decision 6): `codegraph.toml` still uses
+  `build_tool = "scip"` with `scip-java.json`; switching to `build_tool = "gradle"` and indexing
+  through Gradle 9.7.1 was not tried.
+- **`bin/check`** was not run from the worktree (above); heading structure checked by `diff` only.

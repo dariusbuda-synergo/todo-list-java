@@ -1,6 +1,0 @@
-TodoList/CompareTasksTest.java
- TodoList.CompareTasksTest
-TodoList/TaskTest.java
- TodoList.TaskTest
-TodoList/TodoListTest.java
- TodoList.TodoListTest
