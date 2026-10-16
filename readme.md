@@ -5,9 +5,9 @@ This application works on command line.
 
 ## Build with
 
-- Gradle
-- JDK 15
-- JUnit
+- Gradle 9.7.1 (wrapper, `./gradlew`)
+- JDK 21
+- JUnit 5
 
 ## Class Diagram
 
@@ -15,20 +15,30 @@ The class diagram is at [docs/todo-list/guides/class-diagram.png](docs/todo-list
 
 ## Getting started
 
-You can start the application with Gradle or clone the repository.
+You can build and run the application from a terminal or clone the repository.
 
-### Run with Gradle
+### Build and run
 
 1. Go to the root folder
-2. Start the application with Gradle's run command
+2. Point `JAVA_HOME` at a JDK 21 (the build compiles for Java 21 and never downloads a JDK)
 
 ```bash
-gradle run 
+export JAVA_HOME=<a JDK 21>   # e.g. /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 ```
-3. If you want to run the test please, run command
+3. Run the tests
 
 ```bash
-gradle test 
+./gradlew test
+```
+4. Build the application
+
+```bash
+./gradlew build
+```
+5. Start the application from the root folder (it reads and writes `objectFile.txt` in the current folder)
+
+```bash
+java -cp build/classes/java/main Main.Main
 ```
 
 ### Clone the repository

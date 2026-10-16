@@ -715,3 +715,204 @@ Plus this evidence file in the commit.
 ```
 
 No frozen file changed; `.gitignore` is unchanged since slice 1.
+
+## Slice 3 — docs state what was observed
+
+Changes made: `AGENTS.md` (intro, Subsystems build row, `BUILD-1`, Mechanical gate comment and the
+line below it, Branching frozen list gains `gradle.properties`, Build/run/test block and the
+paragraph after it), `readme.md` ("Build with" list, "Run with Gradle" replaced by "Build and run"),
+this section, and the evidence line in `docs/todo-list/README.md`. No build file, wrapper file,
+frozen file or source changed. The `HEAD~1 HEAD` checks were run before the commit against `HEAD`
+(`8e2b0d1`), as in slices 1 and 2.
+
+### `JAVA_HOME=$J21 ./gradlew clean test --warning-mode all > gate3.log 2>&1; echo "exit=$?"; cat gate3.log` (mechanical gate, after the docs edits)
+
+```
+exit=0
+> Task :clean
+
+> Task :compileJava
+Note: /Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/src/main/java/TodoList/FileReader.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+> Task :test
+
+[Incubating] Problems report is available at: file:///Users/ituser/Documents/tdli-ws/todo-list-java/.claude/worktrees/gradle-upgrade/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 740ms
+4 actionable tasks: 4 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
+```
+
+### `grep -inE 'deprecat|warning' gate3.log; echo "(grep exit=$?)"`
+
+```
+(grep exit=1)
+```
+
+### `grep -h '<testsuite' build/test-results/test/TEST-*.xml | grep -o 'name="[^"]*".*timestamp="[^"]*"'`, then each of `tests failures errors skipped` summed over the three files
+
+```
+name="TodoList.TaskTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.571Z"
+name="TodoList.TodoListTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.576Z"
+name="TodoList.CompareTasksTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-16T14:15:44.561Z"
+tests=14
+failures=0
+errors=0
+skipped=0
+```
+
+The docs-only slice leaves the gate green on JDK 21: fresh XML (after `clean`), 14 tests, 0 failures,
+0 errors, 0 skipped, no deprecation or warning line.
+
+### `git status --porcelain` (after the gate, before staging)
+
+```
+ M AGENTS.md
+ M readme.md
+```
+
+Only this slice's edits (the README and this file were edited after this point); the gate left no
+other modified or untracked file (`objectFile.txt` untouched, IO-1).
+
+### `grep -nE 'Gradle 6|6\.7|JDK 15|≤ 15|15 or older|FizzBuzz|gradle run|gradle test|committed, see' AGENTS.md readme.md; echo "(grep exit=$?)"`
+
+```
+(grep exit=1)
+```
+
+### `grep -rnE '6\.7|JDK 15|JDK ≤ 15|FizzBuzz|gradle run|committed' AGENTS.md readme.md docs/` minus the contract, the design, this file and the two verify reports
+
+```
+AGENTS.md:27:| `objectFile.txt` | the serialized task store the app writes at runtime (committed) |
+docs/todo-list/README.md:8:- `design/2026-10-16-gradle-upgrade-contract.md` — change contract for feature `gradle-upgrade`: upgrade the Gradle 6.7 build so `./gradlew test` runs on JDK 21.
+docs/todo-list/evidence/2026-10-16-codegraph-onboarding.md:70:`./gradlew test` (the mechanical gate) could not be run on this machine: the wrapper's Gradle 6.7
+docs/todo-list/evidence/2026-10-16-codegraph-onboarding.md:72:repository). It needs a JDK 15 or older. The main sources compile with javac 21 and the app
+```
+
+None is a current claim about the build: `AGENTS.md:27` is about `objectFile.txt`, which is tracked
+(`git ls-files objectFile.txt` → `objectFile.txt`), not build output; `README.md:8` describes what
+the contract set out to change (the base state); the codegraph-onboarding evidence is a dated record
+of the base. Inside the contract, design, this file and the verify reports, the remaining mentions
+describe the base state or the slice-1 baseline.
+
+### `grep -n '9.7.1\|JDK 21\|Main.Main\|JDK 27\|auto-download\|installations' AGENTS.md readme.md`
+
+```
+AGENTS.md:13:are persisted by Java serialization to `objectFile.txt` in the working directory. Gradle 9.7.1
+AGENTS.md:26:| `build.gradle`, `settings.gradle`, `gradle.properties`, `gradle/wrapper/` | Gradle 9.7.1 build of root project `todolist`, Java 21 toolchain, no JDK auto-download |
+AGENTS.md:38:- `BUILD-1` The wrapper pins Gradle 9.7.1 (`gradle/wrapper/gradle-wrapper.properties:3`), `build.gradle:8-12` pins a Java 21 toolchain and `gradle.properties` disables JDK auto-download, so Gradle must find an installed JDK 21. The gate is observed green with JAVA_HOME = JDK 21; with JAVA_HOME = JDK 27 it is green only with `-Dorg.gradle.java.installations.paths=<JDK 21>`, otherwise it fails with "Cannot find a Java installation … matching: {languageVersion=21 …}".
+AGENTS.md:43:./gradlew test        # JUnit 5 via the wrapper (build.gradle:18-26). Needs JAVA_HOME = a JDK 21 (BUILD-1).
+AGENTS.md:59:export JAVA_HOME=<a JDK 21>             # e.g. /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home (BUILD-1)
+AGENTS.md:62:java -cp build/classes/java/main Main.Main   # run from the repository root (IO-1)
+AGENTS.md:66:the app with the `java -cp` line above. The jar manifest names `Main.Main` as `Main-Class`
+readme.md:8:- Gradle 9.7.1 (wrapper, `./gradlew`)
+readme.md:9:- JDK 21
+readme.md:23:2. Point `JAVA_HOME` at a JDK 21 (the build compiles for Java 21 and never downloads a JDK)
+readme.md:26:export JAVA_HOME=<a JDK 21>   # e.g. /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+readme.md:41:java -cp build/classes/java/main Main.Main
+```
+
+Each new claim and the observed line behind it ("evidence" = this file, "verify-2" =
+`gradle-upgrade-2.verify.md`):
+
+| Claim (file:line) | Backed by |
+|---|---|
+| Gradle 9.7.1 wrapper, `gradle-wrapper.properties:3` (`AGENTS.md:13`, `:26`, `:38`; `readme.md:8`) | evidence:466 `Gradle 9.7.1`; evidence:485 `3:distributionUrl=…gradle-9.7.1-bin.zip`; verify-2:67 |
+| Java 21 toolchain at `build.gradle:8-12` (`AGENTS.md:13`, `:26`, `:38`) | verify-2:111 (`sed -n '8,12p'` is the toolchain block); `sed` below; evidence:570-571 `major version: 65` |
+| JDK auto-download disabled by `gradle.properties` (`AGENTS.md:26`, `:38`; `readme.md:23`) | evidence:496 `Auto-download: Disabled`; verify-2:69; evidence:666 and verify-2:78 no `~/.gradle/jdks` |
+| Gate green with JAVA_HOME = JDK 21 (`AGENTS.md:38`, `:43`) | evidence:538-561; verify-2:27, :31 (`tests=14 failures=0 errors=0 skipped=0`); this section's gate above |
+| JDK 27 green only with `-Dorg.gradle.java.installations.paths=<JDK 21>` (`AGENTS.md:38`) | verify-2:173-185 (run A, `exit=0`, 14/0/0/0, toolchain 21) |
+| JDK 27 without it fails "Cannot find a Java installation … {languageVersion=21 …}" (`AGENTS.md:38`) | verify-2:187-195 (run B, `exit=1`, message verbatim) |
+| Gate test config at `build.gradle:18-26` (`AGENTS.md:43`) | verify-2:112; `sed` below |
+| JDK 21 path form (`AGENTS.md:59`; `readme.md:26`) | evidence:4-5 and verify-2:11 (`J21=…`); evidence:21 `openjdk version "21.0.12.1"` |
+| `build/` ignored, `.gitignore:1` (`AGENTS.md:60`) | evidence:98 `.gitignore:1:build/	build/x`; evidence:127 |
+| No `run` task, only the `java` plugin (`AGENTS.md:65-66`; `readme.md` no longer says `gradle run`) | verify-2:86 (`grep … application\|mainClass build.gradle` → only `25:    useJUnitPlatform()`); verify-2:88 |
+| Manifest `Main-Class: Main.Main`, `build.gradle:30` (`AGENTS.md:66-67`) | evidence:604; verify-2:75, :113 |
+| JUnit 5 (`readme.md:10`) | evidence:361 `org.junit.jupiter:junit-jupiter-api:5.6.0` |
+| App reads and writes `objectFile.txt` in the current folder (`readme.md:38`) | existing invariant `IO-1` (`AGENTS.md:35`, `FileReader.java:11`, `:30`), unchanged |
+
+No JDK other than 21 and 27 is named; starting the app from the jar is stated as not verified.
+
+### `sed -n '8,12p;18,26p;30p' build.gradle`
+
+```
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+        attributes "Main-Class": "Main.Main"
+```
+
+The cited ranges hold the toolchain, the test dependencies plus the test task, and `Main-Class`.
+
+### `diff <(git show $BASE:AGENTS.md | grep -E '^(## |@)') <(grep -E '^(## |@)' AGENTS.md) && echo HEADINGS-IDENTICAL; grep -cxE '## (Subsystems|Invariants|Mechanical gate|Branching)' AGENTS.md`
+
+```
+HEADINGS-IDENTICAL
+4
+```
+
+The import line `@../dev-agent-kit/WORKSPACE.md` and every `##` heading are byte-identical to base;
+the four headings the kit reads are present. `bin/check` was not run: `../dev-agent-kit` does not
+resolve from the nested worktree (design R16); the Lead runs it on the merged commit.
+
+### `git diff --name-only HEAD` (before adding this section and the README line); `git diff $BASE -- src/ objectFile.txt dataFile.txt settings.gradle codegraph.toml scip-java.json .idea/ | wc -l`; `git diff HEAD -- build.gradle gradle.properties gradle/ gradlew gradlew.bat .gitignore | wc -l`; `ls ~/.gradle/jdks`
+
+```
+AGENTS.md
+readme.md
+       0
+       0
+ls: /Users/ituser/.gradle/jdks: No such file or directory
+```
+
+Plus this file and `docs/todo-list/README.md` in the commit. No frozen, build or source file changed;
+no JDK was provisioned.
+
+## Not verified here
+
+- **Starting the application.** Agents do not run it (design § Evidence file). Neither
+  `java -cp build/classes/java/main Main.Main` nor reading an `objectFile.txt` written by the old
+  JDK 15 build from the JDK 21 build (SER-1, design R17) was tried. `Task` is unchanged
+  (`git diff $BASE -- src/` empty in every slice).
+- **`java -jar build/libs/todolist-1.0-SNAPSHOT.jar`.** Only the manifest was checked
+  (`Main-Class: Main.Main`, evidence:604); the jar was never started.
+- **The builder's JDK 27 attempt is not a JDK 27 result.** The slice-2 run
+  (`JAVA_HOME=$J27 … -Porg.gradle.java.installations.paths=$J21`, no `clean`) had every task
+  `UP-TO-DATE` and executed no test (Slice 2 above); its `-P` form also prints a Gradle 10
+  deprecation. The JDK 27 facts in `AGENTS.md` come from the slice-2 verifier's runs with `clean`
+  (verify-2:173-215): green with `-Dorg.gradle.java.installations.paths=<JDK 21>`, red without it
+  because the Homebrew JDK 21 is not auto-detected when Gradle runs on 27.
+- **Gradle on any JDK other than 21 and 27** (for example 17) was not run; the docs name no other JDK.
+- **JDK 21 discovery on other machines.** Only this machine's Homebrew layout was observed; whether
+  another installation of JDK 21 is auto-detected when Gradle runs on a different JDK is unknown.
+- **Wrapper distribution checksum.** `distributionSha256Sum` is not pinned (design § Interfaces).
+- **`.idea/` still targets JDK 15** (`.idea/compiler.xml:4` `bytecodeTargetLevel target="15"`,
+  `.idea/misc.xml:14` `languageLevel="JDK_15"`); left alone by settled decision 4. IDE builds were
+  not tried.
+- **Contract inaccuracy.** The contract says `src/` has no arrow-`switch`; the slice-2 verifier found
+  14 `case … ->` sites (verify-2:224-229). Arrow `switch` is standard since Java 14, so removing
+  `--enable-preview` was still correct, as the green gate without it shows.
+- **Stale `codegraph.toml` comments (follow-up).** `codegraph.toml:14` says `.gradle/`, `.idea/` and
+  `build/` are committed; after slice 1 only `.idea/` is. `codegraph.toml:19-20` says the wrapper
+  pins Gradle 6.7; it now pins 9.7.1. The file is frozen by settled decision 6 and was not edited.
+- **Codegraph `build_tool` switch deferred** (settled decision 6): `codegraph.toml` still uses
+  `build_tool = "scip"` with `scip-java.json`; switching to `build_tool = "gradle"` and indexing
+  through Gradle 9.7.1 was not tried.
+- **`bin/check`** was not run from the worktree (above); heading structure checked by `diff` only.
