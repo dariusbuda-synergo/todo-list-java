@@ -11,7 +11,7 @@ This application works on command line.
 
 ## Class Diagram
 
-Please, click the link to see the class diagram: https://ibb.co/8x90Wtw
+The class diagram is at [docs/todo-list/guides/class-diagram.png](docs/todo-list/guides/class-diagram.png) (source: `src/main/diagram.uml`). Online copy: https://ibb.co/8x90Wtw
 
 ## Getting started
 
