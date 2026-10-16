@@ -12,6 +12,7 @@ The ToDoLy command-line application: the only feature area in this repository. L
 
 - `evidence/2026-10-16-codegraph-onboarding.md` — observed counts from the first codegraph index of this repository.
 - `evidence/2026-10-16-gradle-upgrade.md` — observed outputs of the gradle-upgrade slices (wrapper 9.7.1, gate on JDK 21, JDK 27 attempt).
+- `evidence/gradle-upgrade-1.verify.md` — verify report for gradle-upgrade slice 1 (untrack build state, `.gitignore`): green; gate red on JDK 21 as the design predicts.
 
 ## guides
 
